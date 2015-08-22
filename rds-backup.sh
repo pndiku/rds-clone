@@ -68,29 +68,50 @@ do
     sleep 60
     count=$((count+1))
     echo "... Checking for completion of DB creation... Minutes elapsed=${count}"
-    STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${TEMP_DB} | head -1 | awk '{print $7}')
-    [[ $STATUS == "available" ]] && break
+    STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${TEMP_DB} | head -1 | grep "available")
+    [[ $STATUS == *available* ]] && break
 done    
 
 ################### SECTION 7: Rename the backup instance #######################
 # Now, we rename the backup instance. Deleting takes long, so we want to rename it first, then delete it. (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-ModifyDBInstance.html)
 
 echo "STEP 7: Renaming the old ${BACKUP_DB} DB to ${BACKUP_DB}-old. Please wait..."
-${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${BACKUP_DB}-old --apply-immediately
+${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${BACKUP_DB}-old --apply-immediately > /dev/null 2>&1
+
+count=0
+# Check every minute for it to be created
+while /bin/true
+do
+    sleep 15
+    count=$((count+15))
+    echo "... Checking for renaming of DB creation... ${count} second elapsed"
+    STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB}-old | grep available)
+    [[ $STATUS == *available* ]] && break
+done    
 
 ################### SECTION 8: Rename the backup instance #######################
 # Now, we rename the newly created temporary instance (i.e. the one we created from a snapshot) to be our backup instance (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-ModifyDBInstance.html)
 
 sleep 60 # wait a minute
 echo "STEP 8: Renaming the snapshot DB ${TEMP_DB} to ${BACKUP_DB}. Please wait..."
-${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -n ${BACKUP_DB} --apply-immediately
+${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -n ${BACKUP_DB} --apply-immediately > /dev/null 2>&1
+
+count=0
+# Check every minute for it to be created
+while /bin/true
+do
+    sleep 15
+    count=$((count+15))
+    echo "... Checking for renaming of snapshot... ${count} second elapsed"
+    STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | grep available)
+    [[ $STATUS == *available* ]] && break
+done    
 
 ################### SECTION 9: Rename the backup instance #######################
 # Now, we delete the old backup instance (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DeleteDBInstance.html)
 
-sleep 60 # wait a minute
-echo "STEP 9: Deleting ${BACKUP_DB}.old ..."
-${AWS_RDS_HOME}/bin/rds-delete-db-instance ${BACKUP_DB}-old
+echo "STEP 9: Deleting ${BACKUP_DB}-old ..."
+${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${BACKUP_DB}-old > /dev/null 2>&1
 
 ################# SECTION 10: Find out the port the instance is running on #############
 
