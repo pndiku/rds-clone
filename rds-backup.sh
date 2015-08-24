@@ -141,7 +141,9 @@ echo "STEP 7 of 11: Check if backup instance ${BACKUP_DB} exists. If it does, re
 
 STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | head -1 | grep "available")
 
+DELETE_OLD=0
 if [[ $STATUS == *available* ]]; then
+    DELETE_OLD=1
     echo "... ${BACKUP_DB} exists. Renaming to ${TEMP_DB_OLD}. Please wait..."
     if ! ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${TEMP_DB_OLD} --apply-immediately; then
         echo "*********** ERROR: Failed to rename ${BACKUP_DB}. Cannot proceed ********************"
@@ -216,12 +218,9 @@ psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} dama86dd4g3vj6 -c "UPDATE receipts se
 
 echo ""
 echo "--------------------------------------------------------------"
-echo "STEP 11 of 11: Deleting ${TEMP_DB_OLD} ..."
-if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance ${TEMP_DB_OLD} --skip-final-snapshot -f; then
-    echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
-    exit 1
-fi
+echo "STEP 11 of 11: Deleting old snapshots and instances"
 
+[[ $DELETE_OLD -eq 1 ]] && ${AWS_RDS_HOME}/bin/rds-delete-db-instance ${TEMP_DB_OLD} --skip-final-snapshot -f && echo "... Deleted ${TEMP_DB_OLD}"
 
 echo "STEP 11a: Deleting snapshot ${SNAPSHOT}"
 if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f; then
