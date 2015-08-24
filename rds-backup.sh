@@ -6,15 +6,17 @@ fi
 
 PRIMARY_DB=$1
 BACKUP_DB=$2
-
+SLEEP_TIME=15
 ################### SECTION 3: SETUP PATHS #######################
 # This section sets parameters such as the your AWS credentials are stored, the Postgres username and password, the name of the primary RDS instance and the name of the secondary instance. 
 echo "STEP 1 of 11: Setup parameters"
 export AWS_CREDENTIAL_FILE=/root/.aws.creds
 export AWS_RDS_HOME=/opt/aws/apitools/rds
 export JAVA_HOME=/usr/lib/jvm/jre
-export EC2_REGION="us-east-1"
+export AVAIL_ZONE=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone`
+export EC2_REGION="$(echo $AVAIL_ZONE | sed 's/.$//g')"
 
+echo "Availability Zone: $AVAIL_ZONE"
 export PGUSER=postgres
 export PGPASSWORD=postgres
 export STANDARDPASSWORD=thisisourstandardpassword
@@ -63,9 +65,9 @@ fi
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 4 of 11: Creating names for temporary db instances"
-TEMP_DB=$(mktemp db-XXXXXXXX)
-SNAPSHOT=$(mktemp sn-XXXXXXXX)
-TEMP_DB_OLD=$(mktemp db-XXXXXXXX)
+TEMP_DB=$(mktemp -u db-XXXXXXXX)
+SNAPSHOT=$(mktemp -u sn-XXXXXXXX)
+TEMP_DB_OLD=$(mktemp -u db-XXXXXXXX)
 
 ################### SECTION 5: Create a snapshot of the primary #######################
 #This section creates a snapshot of the primary, giving it a temporary name (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-CreateDBSnapshot.html)
@@ -73,7 +75,9 @@ echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 5 of 11: Creating snapshot ${SNAPSHOT} of ${PRIMARY_DB}. Please wait..."
 
-${AWS_RDS_HOME}/bin/rds-create-db-snapshot -i ${PRIMARY_DB} -s ${SNAPSHOT}
+OUTLINE=$(${AWS_RDS_HOME}/bin/rds-create-db-snapshot -i ${PRIMARY_DB} -s ${SNAPSHOT} | head -1)
+VPC=$(echo $OUTLINE | sed 's/.*vpc/vpc/' | awk '{print $1}')
+
 
 #The command line tools don't tell us when the snapshot has been successfully created, so we need to constantly (every 15 seconds) monitor the snapshot until it shows as "available". (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DescribeDBSnapshots.html)
 
@@ -81,8 +85,8 @@ ${AWS_RDS_HOME}/bin/rds-create-db-snapshot -i ${PRIMARY_DB} -s ${SNAPSHOT}
 count=0
 while /bin/true
 do
-    sleep 30
-    eval count=$((count+30))
+    sleep ${SLEEP_TIME}
+    eval count=$((count+${SLEEP_TIME}))
     echo "... $count seconds gone. Still waiting..."
     STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-snapshots -i ${PRIMARY_DB} -s ${SNAPSHOT} | grep available)
 
@@ -98,7 +102,10 @@ echo "Snapshot ${SNAPSHOT} done"
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 6 of 11: Creating DB Instance ${TEMP_DB} from snapshot ${SNAPSHOT}"
-${AWS_RDS_HOME}/bin/rds-restore-db-instance-from-db-snapshot -i ${TEMP_DB} -s ${SNAPSHOT}
+
+SEC=$(${AWS_RDS_HOME}/bin/rds-describe-db-subnet-groups | grep $VPC | awk '{print $2}')
+
+${AWS_RDS_HOME}/bin/rds-restore-db-instance-from-db-snapshot -i ${TEMP_DB} -s ${SNAPSHOT} -sn ${SEC}
 
 # The command line tools don't tell us when the instance has been successfully created, so we need to constantly (every 60 seconds because this takes longer than snapshotting) monitor the instance until it shows as "available". (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DescribeDBInstances.html)
 
@@ -106,9 +113,9 @@ count=0
 # Check every minute for it to be created
 while /bin/true
 do
-    sleep 60
-    count=$((count+1))
-    echo "... Checking for completion of DB creation... Minutes elapsed=${count}"
+    sleep ${SLEEP_TIME}
+    count=$((count+${SLEEP_TIME}))
+    echo "... Checking for completion of DB creation... ${count} seconds elapsed"
     STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${TEMP_DB} | head -1 | grep "available")
     [[ $STATUS == *available* ]] && break
 done
@@ -131,17 +138,8 @@ STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | head -1 | 
 if [[ $STATUS == *available* ]]; then
     echo "... ${BACKUP_DB} exists. Renaming to ${TEMP_DB_OLD}. Please wait..."
     ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${TEMP_DB_OLD} --apply-immediately > /dev/null 2>&1
-    
-    count=0
-    # Check every minute for it to be created
-    while /bin/true
-    do
-        sleep 15
-        count=$((count+15))
-        echo "... Checking for renaming of DB... ${count} seconds elapsed"
-        STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${TEMP_DB_OLD} | grep available)
-        [[ $STATUS == *available* ]] && break
-    done    
+
+    sleep 5 # Just to make sure
     echo "... Finished renaming old backup instance"
 fi
 
@@ -153,13 +151,12 @@ echo "--------------------------------------------------------------"
 echo "STEP 8 of 11: Renaming the snapshot DB ${TEMP_DB} to ${BACKUP_DB}. Please wait..."
 ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -sg ${SECURITY_GROUP} -n ${BACKUP_DB} --apply-immediately > /dev/null 2>&1
 
-sleep 60
 count=0
 # Check every minute for it to be created
 while /bin/true
 do
-    sleep 15
-    count=$((count+15))
+    sleep ${SLEEP_TIME}
+    count=$((count+${SLEEP_TIME}))
     echo "... Checking for renaming of snapshot... ${count} seconds elapsed"
     STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | grep available)
     [[ $STATUS == *available* ]] && break
@@ -192,12 +189,16 @@ echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 11 of 11: Now resetting user passwords & fixing receipts table"
 SQL_FILE=$(mktemp)
-for username in $(psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -tc "SELECT usename FROM pg_catalog.pg_user u WHERE usecreatedb=false AND usename <> 'postgres'"); do
-    echo "ALTER USER $username WITH PASSWORD '"$STANDARDPASSWORD"'" >> $SQL_FILE
+for username in `psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -tc "SELECT usename FROM pg_catalog.pg_user u WHERE usename NOT IN ('rdsadmin', 'rdsrepladmin');"`; do
+    echo "ALTER USER $username WITH PASSWORD '"${STANDARDPASSWORD}"';" >> $SQL_FILE
 done
 
+psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -f $SQL_FILE
+rm $SQL_FILE
+
+echo "Resetting images for receipts table"
 # Reset images
 
-psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -f $SQL_FILE
+psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} dama86dd4g3vj6 -c "UPDATE receipts set S3_path_to_image = 'test'";
 
 echo "**************** COMPLETED ******************"
