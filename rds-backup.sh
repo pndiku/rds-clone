@@ -181,7 +181,7 @@ done
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 9 of 11: Deleting ${TEMP_DB_OLD} ..."
-if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${TEMP_DB_OLD};
+if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${TEMP_DB_OLD}; then
     echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
     exit 1
 fi
