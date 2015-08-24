@@ -180,33 +180,13 @@ do
     [[ $STATUS == *available* ]] && break
 done    
 
-################### SECTION 9: Rename the backup instance #######################
-# Now, we delete the old backup instance (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DeleteDBInstance.html)
-
-echo ""
-echo "--------------------------------------------------------------"
-echo "STEP 9 of 11: Deleting ${TEMP_DB_OLD} ..."
-if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance ${TEMP_DB_OLD} --skip-final-snapshot -f; then
-    echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
-    exit 1
-fi
-
-
-echo "STEP 9a: Deleting snapshot ${SNAPSHOT}"
-if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f; then
-    echo "Snapshot deleted"
-else
-    echo "Failed to delete snapshot ${SNAPSHOT}. Please delete manually."
-fi
-
-
-################# SECTION 10: Find out the port the instance is running on #############
+################# SECTION 9: Find out the port the instance is running on #############
 
 ################### so our psql tool can connect #############
 # Now, we delete the old backup instance (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DescribeDBInstances.html)
 echo ""
 echo "--------------------------------------------------------------"
-echo "STEP 10 of 11: Configuring host & port"
+echo "STEP 9 of 11: Configuring host & port"
 
 # Discover host & port
 AWS_RDS_DETAILS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | head -1)
@@ -217,7 +197,7 @@ AWS_RDS_PORT=$(echo ${AWS_RDS_DETAILS} | awk '{print $10}')
 # Now, we use postgresql's client tool to reset use passwords
 echo ""
 echo "--------------------------------------------------------------"
-echo "STEP 11 of 11: Now resetting user passwords & fixing receipts table"
+echo "STEP 10 of 11: Now resetting user passwords & fixing receipts table"
 SQL_FILE=$(mktemp)
 for username in `psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -tc "SELECT usename FROM pg_catalog.pg_user u WHERE usename NOT IN ('rdsadmin', 'rdsrepladmin');"`; do
     echo "ALTER USER $username WITH PASSWORD '"${STANDARDPASSWORD}"';" >> $SQL_FILE
@@ -230,5 +210,25 @@ echo "Resetting images for receipts table"
 # Reset images
 
 psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} dama86dd4g3vj6 -c "UPDATE receipts set S3_path_to_image = 'test'";
+
+################### SECTION 11: Rename the backup instance #######################
+# Now, we delete the old backup instance (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DeleteDBInstance.html)
+
+echo ""
+echo "--------------------------------------------------------------"
+echo "STEP 11 of 11: Deleting ${TEMP_DB_OLD} ..."
+if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance ${TEMP_DB_OLD} --skip-final-snapshot -f; then
+    echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
+    exit 1
+fi
+
+
+echo "STEP 11a: Deleting snapshot ${SNAPSHOT}"
+if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f; then
+    echo "Snapshot deleted"
+else
+    echo "Failed to delete snapshot ${SNAPSHOT}. Please delete manually."
+fi
+
 
 echo "**************** COMPLETED ******************"
