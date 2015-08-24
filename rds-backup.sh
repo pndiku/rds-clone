@@ -200,6 +200,13 @@ AWS_RDS_PORT=$(echo ${AWS_RDS_DETAILS} | awk '{print $10}')
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 10 of 11: Now resetting user passwords & fixing receipts table"
+
+# First make sure instance is reachable. Sometimes this takes some time
+while /bin/true
+do
+    [[ host ${AWS_RDS_HOST} ]] && break
+done
+
 SQL_FILE=$(mktemp)
 for username in `psql -h ${AWS_RDS_HOST} -p ${AWS_RDS_PORT} template1 -tc "SELECT usename FROM pg_catalog.pg_user u WHERE usename NOT IN ('rdsadmin', 'rdsrepladmin');"`; do
     echo "ALTER USER $username WITH PASSWORD '"${STANDARDPASSWORD}"';" >> $SQL_FILE
