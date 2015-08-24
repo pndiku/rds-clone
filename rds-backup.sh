@@ -75,8 +75,11 @@ echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 5 of 11: Creating snapshot ${SNAPSHOT} of ${PRIMARY_DB}. Please wait..."
 
-OUTLINE=$(${AWS_RDS_HOME}/bin/rds-create-db-snapshot -i ${PRIMARY_DB} -s ${SNAPSHOT} | head -1)
-VPC=$(echo $OUTLINE | sed 's/.*vpc/vpc/' | awk '{print $1}')
+if ! ${AWS_RDS_HOME}/bin/rds-create-db-snapshot -i ${PRIMARY_DB} -s ${SNAPSHOT} | tee ${OUTFILE}; then 
+    echo "*********** ERROR: Failed to create snapshot of ${PRIMARY_DB} ********************"
+    exit 1
+fi  
+VPC=$(head -1 ${OUTFILE} | sed 's/.*vpc/vpc/' | awk '{print $1}')
 
 
 #The command line tools don't tell us when the snapshot has been successfully created, so we need to constantly (every 15 seconds) monitor the snapshot until it shows as "available". (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DescribeDBSnapshots.html)
@@ -105,7 +108,15 @@ echo "STEP 6 of 11: Creating DB Instance ${TEMP_DB} from snapshot ${SNAPSHOT}"
 
 SEC=$(${AWS_RDS_HOME}/bin/rds-describe-db-subnet-groups | grep $VPC | awk '{print $2}')
 
-${AWS_RDS_HOME}/bin/rds-restore-db-instance-from-db-snapshot -i ${TEMP_DB} -s ${SNAPSHOT} -sn ${SEC}
+if [[ -z ${SEC} ]]; then
+    echo "*********** ERROR: Failed to find any subnet groups for ${VPC} ********************"
+    exit 1
+fi
+
+if ! ${AWS_RDS_HOME}/bin/rds-restore-db-instance-from-db-snapshot -i ${TEMP_DB} -s ${SNAPSHOT} -sn ${SEC}; then
+    echo "*********** ERROR: Failed to restore the snapshot ${SNAPSHOT} as a DB Instance ${TEMP_DB} ********************"
+    exit 1
+fi
 
 # The command line tools don't tell us when the instance has been successfully created, so we need to constantly (every 60 seconds because this takes longer than snapshotting) monitor the instance until it shows as "available". (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-DescribeDBInstances.html)
 
@@ -121,8 +132,11 @@ do
 done
 
 echo "STEP 6a: Deleting snapshot ${SNAPSHOT}"
-${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f 1
-echo "Snapshot deleted"
+if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f 1; then
+    echo "Snapshot deleted"
+else
+    echo "Failed to delete snapshot ${SNAPSHOT}. Please delete manually."
+fi
 
 
 ################### SECTION 7: Rename the backup instance #######################
@@ -137,7 +151,10 @@ STATUS=$(${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB} | head -1 | 
 
 if [[ $STATUS == *available* ]]; then
     echo "... ${BACKUP_DB} exists. Renaming to ${TEMP_DB_OLD}. Please wait..."
-    ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${TEMP_DB_OLD} --apply-immediately > /dev/null 2>&1
+    if ! ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${BACKUP_DB} -n ${TEMP_DB_OLD} --apply-immediately; then
+        echo "*********** ERROR: Failed to rename ${BACKUP_DB}. Cannot proceed ********************"
+        exit 1
+    fi
 
     sleep 5 # Just to make sure
     echo "... Finished renaming old backup instance"
@@ -149,7 +166,11 @@ fi
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 8 of 11: Renaming the snapshot DB ${TEMP_DB} to ${BACKUP_DB}. Please wait..."
-${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -sg ${SECURITY_GROUP} -n ${BACKUP_DB} --apply-immediately > /dev/null 2>&1
+if ! ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -sg ${SECURITY_GROUP} -n ${BACKUP_DB} --apply-immediately; then
+    echo "*********** ERROR: Failed to rename instance ${TEMP_DB} to ${BACKUP_DB}. Cannot proceed ********************"
+    exit 1
+fi
+
 
 count=0
 # Check every minute for it to be created
@@ -168,7 +189,11 @@ done
 echo ""
 echo "--------------------------------------------------------------"
 echo "STEP 9 of 11: Deleting ${TEMP_DB_OLD} ..."
-${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${TEMP_DB_OLD} > /dev/null 2>&1
+if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${TEMP_DB_OLD};
+    echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
+    exit 1
+fi
+
 
 ################# SECTION 10: Find out the port the instance is running on #############
 
