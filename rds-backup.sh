@@ -204,7 +204,7 @@ echo "STEP 10 of 11: Now resetting user passwords & fixing receipts table"
 # First make sure instance is reachable. Sometimes this takes some time
 while /bin/true
 do
-    [[ host ${AWS_RDS_HOST} ]] && break
+    [[ `host ${AWS_RDS_HOST}` ]] && break
 done
 
 SQL_FILE=$(mktemp)
