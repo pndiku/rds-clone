@@ -131,14 +131,6 @@ do
     [[ $STATUS == *available* ]] && break
 done
 
-echo "STEP 6a: Deleting snapshot ${SNAPSHOT}"
-if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f 1; then
-    echo "Snapshot deleted"
-else
-    echo "Failed to delete snapshot ${SNAPSHOT}. Please delete manually."
-fi
-
-
 ################### SECTION 7: Rename the backup instance #######################
 # Now, we rename the backup instance. Deleting takes long, so we want to rename it first, then delete it. (http://docs.aws.amazon.com/AmazonRDS/latest/CommandLineReference/CLIReference-cmd-ModifyDBInstance.html)
 
@@ -192,6 +184,14 @@ echo "STEP 9 of 11: Deleting ${TEMP_DB_OLD} ..."
 if ! ${AWS_RDS_HOME}/bin/rds-delete-db-instance --skip-final-snapshot -f ${TEMP_DB_OLD};
     echo "*********** ERROR: Failed to delete DB Instance ${TEMP_DB_OLD}. Please delete manually ********************"
     exit 1
+fi
+
+
+echo "STEP 9a: Deleting snapshot ${SNAPSHOT}"
+if ${AWS_RDS_HOME}/bin/rds-delete-db-snapshot ${SNAPSHOT} -f 1; then
+    echo "Snapshot deleted"
+else
+    echo "Failed to delete snapshot ${SNAPSHOT}. Please delete manually."
 fi
 
 
