@@ -148,7 +148,12 @@ if [[ $STATUS == *available* ]]; then
         exit 1
     fi
 
-    sleep 5 # Just to make sure
+    # Wait to be sure it's been renamed, or the next step will fail
+    while ${AWS_RDS_HOME}/bin/rds-describe-db-instances ${BACKUP_DB}; do
+        echo "... Waiting for it to be renamed"
+        sleep 5
+    done
+
     echo "... Finished renaming old backup instance"
 fi
 
@@ -163,9 +168,9 @@ if ! ${AWS_RDS_HOME}/bin/rds-modify-db-instance ${TEMP_DB} -sg ${SECURITY_GROUP}
     exit 1
 fi
 
-
+sleep ${SLEEP_TIME}
 count=0
-# Check every minute for it to be created
+# Wait for it to be renamed & made available
 while /bin/true
 do
     sleep ${SLEEP_TIME}
